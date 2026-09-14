@@ -1,0 +1,66 @@
+name: CI Pipeline
+
+on: [push, pull_request]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (${{ matrix.runtime }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [stable, oldstable]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.runtime }}
+          cache: true
+
+      - name: Install dependencies
+        if: hashFiles('go.mod') != ''
+        run: go mod download
+
+      - name: Check formatting
+        if: hashFiles('go.mod') != ''
+        run: test -z "$(gofmt -l $(find . -name '*.go' -not -path './.git/*'))"
+
+      - name: Run lint
+        if: hashFiles('go.mod') != ''
+        run: go vet ./...
+
+      - name: Build
+        if: hashFiles('go.mod') != ''
+        run: go build ./...
+
+      - name: Run tests
+        if: hashFiles('go.mod') != ''
+        run: go test ./...
+
+      - name: Write pipeline summary
+        if: always()
+        env:
+          CHECK_FORMATTING_OUTCOME: ${{ steps.check-formatting.outcome }}
+          CHECK_LINT_OUTCOME: ${{ steps.check-lint.outcome }}
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          TEST_OUTCOME: ${{ steps.test.outcome }}
+        run: |
+          {
+            printf '| Step | Outcome |\n'
+            printf '| --- | --- |\n'
+            printf '| Check formatting | %s |\n' "$CHECK_FORMATTING_OUTCOME"
+            printf '| Run lint | %s |\n' "$CHECK_LINT_OUTCOME"
+            printf '| Build | %s |\n' "$BUILD_OUTCOME"
+            printf '| Run tests | %s |\n' "$TEST_OUTCOME"
+          } >> "$GITHUB_STEP_SUMMARY"
